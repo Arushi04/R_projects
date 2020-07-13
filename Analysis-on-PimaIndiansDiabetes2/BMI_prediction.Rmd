@@ -1,0 +1,223 @@
+---
+title: "PimaIndiansDiabetes2-Analysis"
+author: "Arushi Sharma"
+date: "4/26/2020"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message = FALSE}
+#importing libraries
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(mlbench)
+library(modelr)
+library(purrr)
+library(modelr)
+```
+
+
+
+#Loading the dataset:
+
+```{r}
+data(PimaIndiansDiabetes2)
+PimaIndiansDiabetes2 <- PimaIndiansDiabetes2
+dim(PimaIndiansDiabetes2)
+head(PimaIndiansDiabetes2)
+```
+
+
+### Corelation matrix to see the corelation between different variables with BMI
+
+```{r}
+pairs(PimaIndiansDiabetes2)
+```
+
+
+
+
+From the above plot we see, triceps have the best positive linear corelation with mass among all other variables. And we see pressure is also exhibiting a linear relationship. Glucose is also somehow exhibiting linear relationship. Can't predict diabetes. so, taking that as well to check.
+So, selecting Triceps, Pressure, Glucose and diabetes to check the relationship with mass using ggplots.
+
+
+```{r}
+# Plotting triceps with mass to check the linear relation between them
+
+ggplot(PimaIndiansDiabetes2, aes(x=triceps, y=mass)) + geom_point()
+```
+
+After plotting, we see that triceps relationship is linear with the mass. Now, let's check how pressure varies with mass.
+
+
+```{r}
+#Plotting pressure with mass
+ggplot(PimaIndiansDiabetes2, aes(x=pressure, y=mass)) + geom_point() 
+```
+
+It looks like pressure is also varying linearly. To have a clear picture, experimenting with taking log of individual vs both variables.  
+
+```{r}
+#Plotting by taking log of both pressure and mass
+ggplot(PimaIndiansDiabetes2, aes(x=log(pressure), y=log(mass))) + geom_point()
+
+```
+
+
+After taking log of both variables, we see that the relationship between pressure and mass is quite linear. Now let's plot diabetes and glucose too to check.
+
+
+
+```{r}
+#Plotting diabetes against mass
+ggplot(PimaIndiansDiabetes2, aes(x=diabetes, y=mass)) + geom_boxplot()
+```
+
+
+Diabetes have different medians and can be used as a good predictor variable to estimate BMI.
+Now, testing the plot of glucose with mass.
+
+```{r}
+#Plotting glucose against mass
+ggplot(PimaIndiansDiabetes2, aes(x=glucose, y=mass)) + geom_point()
+
+```
+
+
+
+Glucose has a very weak linear relationship with mass. So, we can drop it.    
+
+Among the variables tested, triceps has the strongest positive linear relationship with mass.    
+Diabetes also looks like a good predictor variable. Pressure also exhibit a positive linear relation with mass when we take logs.  
+So, selecting triceps and diabetes as the 2 predictor variables for body mass index as they are having the most linear relationship with mass.
+
+
+```{r}
+#Fitting linear model and printing the model summary
+
+fit <- lm(mass ~ triceps + diabetes, data = PimaIndiansDiabetes2) 
+summary(fit)
+
+coef(fit)
+sqrt(mean(resid(fit)^2))
+mean(abs(resid(fit)))
+
+```
+
+
+Now, we want to check if the predictor variables that we selected were proper or not. For that, we will plot the residuals of the fitted model against the predictor variables we used to fit the model.
+
+
+```{r}
+data <- PimaIndiansDiabetes2
+fit <- lm(mass ~ (triceps + diabetes), data = data)
+residual <- resid(fit)
+
+data %>% add_residuals(fit) %>%
+  ggplot() + geom_point(aes(x=triceps, y=resid))
+
+
+data %>% add_residuals(fit) %>%
+  ggplot() + geom_boxplot(aes(x=diabetes, y=resid))
+```
+
+In the residual graph of triceps against residuals, we see that there is no pattern which shows randomness.
+In residual graph against diabetes, we see both the mean are at the same level and there is no variation.
+So, we can say that triceps and diabetes are good predictor variables and the model is appropriate. 
+
+
+Now, we will try to find out if there was any other variable which could have made the model better.
+
+```{r}
+#Testing pressure against residual:
+data %>% add_residuals(fit) %>%
+  ggplot() + geom_point(aes(x=pressure, y=resid))
+
+```
+
+#### Testing for glucose
+
+```{r}
+#Testing diabetes against residual:
+data %>% add_residuals(fit) %>%
+  ggplot() + geom_point(aes(x=glucose, y=resid))
+```
+
+
+We can consider adding another predictor variable based on our previous plots.
+We tested pressure earlier while selecting predictor variables, which showed linear relationship with the mass and exhibited a random scatter in the residual graph. So, we can consider taking pressure as a predictor variable. Let's add that to our model and see if it helps the model.  
+
+```{r}
+fit1 <- lm(mass ~ (triceps + diabetes + pressure), data = data)
+summary(fit)
+coef(fit)
+sqrt(mean(resid(fit)^2))
+mean(abs(resid(fit)))
+```
+
+
+After adding this variable to the model , we see that root mean square has decreased by a tiny bit which is fine for the model.
+From all the above conclusions and plotting, we can say it is good to add pressure as a third predictor variable though it increases the model performance by a little.
+
+
+
+#### Now, we will fit the model using 5-fold cross-validation and see how RMSE differs from the previous model.
+
+```{r}
+#Creating function that performs cross validation
+
+crossValidation <- function(myformula, data, k){
+  set.seed(1)
+  partitioned <- crossv_kfold(data, k)
+  partitioned <- partitioned %>% 
+    mutate(fit = map(train,~ lm(myformula, data = .))) %>%
+    mutate(rmse_test = map2_dbl(fit, test, ~ rmse(.x, .y)))
+  return (mean(partitioned$rmse_test))
+}
+
+#Cross validated RMSE of the model proposed above
+
+crossValidation(mass ~ triceps + diabetes + pressure, PimaIndiansDiabetes2, 5)
+```
+
+
+We got the mean rmse of  5.09 while in previous model, the rmse of the same model is 5.13. So, it shows that the model improves when done by cross validation for the same set of predictor variables.   
+
+
+```{r}
+#Plotting the rm
+set.seed(1)
+
+predictors = c("triceps", "pressure", "diabetes", "glucose", "insulin")
+fit_rmse <- data.frame(nvar = predictors, rmse =
+                     c(crossValidation(mass ~ triceps, PimaIndiansDiabetes2, 5),
+                       crossValidation(mass ~ triceps + pressure, PimaIndiansDiabetes2, 5),
+                       crossValidation(mass ~ triceps + pressure + diabetes, PimaIndiansDiabetes2, 5),
+                       crossValidation(mass ~ triceps + pressure + diabetes + glucose,
+                                       PimaIndiansDiabetes2, 5),
+                       crossValidation(mass ~ triceps + pressure + diabetes + glucose + insulin,
+                                       PimaIndiansDiabetes2, 5)))
+
+
+fit_rmse$nvar <- factor(fit_rmse$nvar, levels = c("triceps", "pressure", "diabetes",
+                                                  "glucose", "insulin"))
+fit_rmse
+
+ggplot(fit_rmse) + aes(x=nvar, y = rmse, group=1) + geom_point() + geom_line() +
+  labs(x="Predictors",
+       y="RMSE",
+       title="Plot showing rmse at each step of variable selection")
+
+```
+
+
+## Result of Analysis : 
+The 3rd model having triceps, pressure and diabetes is the most predictive model, having rmse 5.091698. And we see when we add predictor variable glucose and insulin to the model, the rmse increases.
+
+So, the model lm(mass ~ triceps + diabetes + pressure) would be the best model for predicting BMI.
+
